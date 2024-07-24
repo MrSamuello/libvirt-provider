@@ -34,6 +34,8 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/ptr"
 	"libvirt.org/go/libvirtxml"
+
+	"github.com/MrSamuello/libvirt-provider/internal/metrics"
 )
 
 const (
@@ -415,6 +417,8 @@ func (r *MachineReconciler) processNextWorkItem(ctx context.Context, log logr.Lo
 	}
 	defer r.queue.Done(item)
 
+	metrics.OpsProcessed.Inc()
+
 	id := item.(string)
 	log = log.WithValues("machineID", id)
 	ctx = logr.NewContext(ctx, log)
@@ -422,6 +426,9 @@ func (r *MachineReconciler) processNextWorkItem(ctx context.Context, log logr.Lo
 	if err := r.reconcileMachine(ctx, id); err != nil {
 		log.Error(err, "failed to reconcile machine")
 		r.queue.AddRateLimited(item)
+
+		metrics.OpsFailed.Inc()
+
 		return true
 	}
 
