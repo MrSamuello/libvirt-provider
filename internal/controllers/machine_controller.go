@@ -23,6 +23,7 @@ import (
 	"github.com/ironcore-dev/libvirt-provider/internal/libvirt/guest"
 	libvirtmeta "github.com/ironcore-dev/libvirt-provider/internal/libvirt/meta"
 	libvirtutils "github.com/ironcore-dev/libvirt-provider/internal/libvirt/utils"
+	"github.com/ironcore-dev/libvirt-provider/internal/metrics"
 	providerimage "github.com/ironcore-dev/libvirt-provider/internal/oci"
 	"github.com/ironcore-dev/libvirt-provider/internal/osutils"
 	providernetworkinterface "github.com/ironcore-dev/libvirt-provider/internal/plugins/networkinterface"
@@ -34,8 +35,6 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/ptr"
 	"libvirt.org/go/libvirtxml"
-
-	"github.com/MrSamuello/libvirt-provider/internal/metrics"
 )
 
 const (
@@ -96,8 +95,11 @@ func NewMachineReconciler(
 	}
 
 	return &MachineReconciler{
-		log:                            log,
-		queue:                          workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
+		log: log,
+		queue: workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{
+			MetricsProvider: metrics.WorkqueueMetricsProvider{},
+			Name:            "machines",
+		}),
 		libvirt:                        libvirt,
 		machines:                       machines,
 		machineEvents:                  machineEvents,
@@ -144,7 +146,7 @@ func (r *MachineReconciler) Start(ctx context.Context) error {
 	log := r.log
 
 	//todo make configurable
-	workerSize := 15
+	workerSize := 1
 
 	r.imageCache.AddListener(providerimage.ListenerFuncs{
 		HandlePullDoneFunc: func(evt providerimage.PullDoneEvent) {
@@ -417,8 +419,6 @@ func (r *MachineReconciler) processNextWorkItem(ctx context.Context, log logr.Lo
 	}
 	defer r.queue.Done(item)
 
-	metrics.OpsProcessed.Inc()
-
 	id := item.(string)
 	log = log.WithValues("machineID", id)
 	ctx = logr.NewContext(ctx, log)
@@ -426,8 +426,6 @@ func (r *MachineReconciler) processNextWorkItem(ctx context.Context, log logr.Lo
 	if err := r.reconcileMachine(ctx, id); err != nil {
 		log.Error(err, "failed to reconcile machine")
 		r.queue.AddRateLimited(item)
-
-		metrics.OpsFailed.Inc()
 
 		return true
 	}
